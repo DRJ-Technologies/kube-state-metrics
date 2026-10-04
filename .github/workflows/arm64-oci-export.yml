@@ -1,0 +1,73 @@
+name: ARM64 OCI export
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    if: >-
+      github.repository == 'DRJ-Technologies/k8s' &&
+      github.event.repository.private == true &&
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out requested producer source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: DRJ-Technologies/kube-state-metrics
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify producer main
+        env:
+          REQUESTED_SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags origin main
+          source_head=$(git rev-parse HEAD)
+          test "$source_head" = "$REQUESTED_SOURCE_SHA"
+          source_main=$(git rev-parse refs/remotes/origin/main)
+          test "$source_main" = "$REQUESTED_SOURCE_SHA"
+          source_status=$(git status --porcelain)
+          test -z "$source_status"
+
+      - name: Set up isolated Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+        with:
+          driver: docker-container
+          cache-binary: false
+
+      - name: Build native Dockerfile and export OCI
+        id: build
+        env:
+          BUILDX_METADATA_PROVENANCE: max
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/ksm-arm64"
+          mkdir -p "$output"
+          docker buildx build \
+            --build-arg GOARCH=arm64 \
+            --build-arg "GOVERSION=$(cat .go-version)" \
+            --file Dockerfile --progress plain --provenance=mode=max \
+            --metadata-file "$output/build-metadata.json" \
+            --output "type=oci,dest=$output/kube-state-metrics-arm64.oci.tar" \
+            . 2>&1 | tee "$output/build.log"
+
+      - name: Retain OCI export and native build diagnostics
+        if: always() && (steps.build.outcome == 'success' || steps.build.outcome == 'failure')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: kube-state-metrics-arm64
+          path: ${{ runner.temp }}/ksm-arm64/
+          if-no-files-found: error
+          compression-level: 0
