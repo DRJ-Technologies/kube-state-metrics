@@ -1,20 +1,42 @@
 name: ARM64 OCI export
 
 on:
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
   export:
-    if: github.repository == 'DRJ-Technologies/kube-state-metrics' && github.ref == 'refs/heads/main'
+    if: >-
+      github.repository == 'DRJ-Technologies/k8s' &&
+      github.event.repository.private == true &&
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     steps:
-      - name: Check out dispatched main
+      - name: Check out requested producer source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          repository: DRJ-Technologies/kube-state-metrics
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
           persist-credentials: false
+
+      - name: Verify producer main
+        env:
+          REQUESTED_SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags origin main
+          test "$(git rev-parse HEAD)" = "$REQUESTED_SOURCE_SHA"
+          test "$(git rev-parse refs/remotes/origin/main)" = "$REQUESTED_SOURCE_SHA"
+          test -z "$(git status --porcelain)"
 
       - name: Set up isolated Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
