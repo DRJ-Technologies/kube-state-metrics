@@ -56,6 +56,7 @@ jobs:
           output="$RUNNER_TEMP/ksm-arm64"
           mkdir -p "$output"
           docker buildx build \
+            --platform linux/arm64 \
             --build-arg GOARCH=arm64 \
             --build-arg "GOVERSION=$(cat .go-version)" \
             --file Dockerfile --progress plain --provenance=mode=max \
